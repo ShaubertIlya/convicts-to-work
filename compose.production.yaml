@@ -1,0 +1,121 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U convicts_to_work -d convicts_to_work"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  storage:
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    environment:
+      AWS_ACCESS_KEY_ID: convicts_to_work
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: convicts-to-work
+    volumes:
+      - storage_data:/data
+
+  backend:
+    build: .
+    restart: unless-stopped
+    command: ["/bin/sh", "-c", "python manage.py migrate && python manage.py load_reference_data && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required}
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: backend,${ENBEK_DOMAIN:?ENBEK_DOMAIN is required}
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://${ENBEK_DOMAIN}
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://storage:8333
+      S3_ACCESS_KEY: convicts_to_work
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET_NAME: convicts-to-work
+      BIOMETRY_BASE_URL: http://biometry:8100
+      BIOMETRY_PUBLIC_URL: https://biometry.greymattergroup.org
+      FRONTEND_PUBLIC_URL: https://${ENBEK_DOMAIN}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage:
+        condition: service_started
+    volumes:
+      - ./media:/app/media
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["celery", "-A", "config", "worker", "-l", "INFO"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_started
+
+  beat:
+    build: .
+    restart: unless-stopped
+    command: ["celery", "-A", "config", "beat", "-l", "INFO"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: frontend
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      STORAGE_INTERNAL_URL: http://storage:8333
+      FRONTEND_PUBLIC_URL: https://${ENBEK_DOMAIN}
+    ports:
+      - "127.0.0.1:${ENBEK_HTTP_PORT:-3180}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
