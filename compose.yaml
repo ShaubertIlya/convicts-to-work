@@ -1,0 +1,128 @@
+name: convicts_to_work
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-convicts_to_work_dev}
+    ports:
+      - "54321:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U convicts_to_work -d convicts_to_work"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "63791:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  storage:
+    image: chrislusf/seaweedfs:latest
+    environment:
+      AWS_ACCESS_KEY_ID: convicts_to_work
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-convicts_to_work_dev_secret}
+      S3_BUCKET: convicts-to-work
+    ports:
+      - "9000:8333"
+    volumes:
+      - minio_data:/data
+
+  backend:
+    build: .
+    command: ["/bin/sh", "-c", "python manage.py migrate && python manage.py load_reference_data && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-secret-change-me}
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:3000
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-convicts_to_work_dev}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://storage:8333
+      S3_ACCESS_KEY: convicts_to_work
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-convicts_to_work_dev_secret}
+      S3_BUCKET_NAME: convicts-to-work
+      BIOMETRY_BASE_URL: http://host.docker.internal:8100
+      BIOMETRY_PUBLIC_URL: http://localhost:8100
+      FRONTEND_PUBLIC_URL: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage:
+        condition: service_started
+    volumes:
+      - media_data:/app/media
+      - ./media/prisoners/reference:/app/media/prisoners/reference
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    build: .
+    command: ["celery", "-A", "config", "worker", "-l", "INFO"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-secret-change-me}
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-convicts_to_work_dev}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_started
+
+  beat:
+    build: .
+    command: ["celery", "-A", "config", "beat", "-l", "INFO"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-secret-change-me}
+      POSTGRES_DB: convicts_to_work
+      POSTGRES_USER: convicts_to_work
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-convicts_to_work_dev}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: frontend
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      FRONTEND_PUBLIC_URL: http://localhost:3000
+      STORAGE_INTERNAL_URL: http://storage:8333
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  media_data:
