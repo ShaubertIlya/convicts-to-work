@@ -28,7 +28,7 @@ export default function PrisonerCasePage() {
   if (!prisoner) return <div className="portal-loading inline"><span className="loader" />Загрузка личного дела…</div>;
 
   return <>
-    <Link className="back-link" href="/prisoners">← К реестру осуждённых</Link>
+    <div className="prisoner-case-actions"><Link className="back-link" href="/prisoners">← К реестру осуждённых</Link><Link className="md-button secondary" href={`/prisoners/${prisoner.id}/edit`}>Редактировать</Link></div>
     <div className="case-header surface-panel">
       <div className="case-photo">{prisoner.photo ? <Image unoptimized width={132} height={166} src={mediaPath(prisoner.photo)} alt={`Фото: ${prisoner.full_name}`} /> : "Фото"}</div>
       <div><p className="page-kicker">Личное дело</p><h1>{prisoner.full_name}</h1><p>ИИН {prisoner.iin} · Дата рождения {formatDate(prisoner.birth_date)}</p><div className="skill-chips">{prisoner.skills.map((item) => <span key={item.id}>{item.name_ru}</span>)}</div></div>

@@ -32,6 +32,7 @@ class PrisonerViewSet(viewsets.ModelViewSet):
     serializer_class = PrisonerSerializer
     permission_classes = [EnbekOnly]
     pagination_class = RegistryPagination
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         from apps.contracts.models import EmploymentContract

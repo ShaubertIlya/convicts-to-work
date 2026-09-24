@@ -65,7 +65,7 @@ export default function PrisonersPage() {
   }
 
   return <>
-    <div className="page-heading"><div><p className="page-kicker">Учёт и подбор</p><h1>Осуждённые</h1><p>Карточки, профессиональные сведения, ограничения и текущая занятость.</p></div></div>
+    <div className="page-heading"><div><p className="page-kicker">Учёт и подбор</p><h1>Осуждённые</h1><p>Карточки, профессиональные сведения, ограничения и текущая занятость.</p></div><Link className="md-button primary" href="/prisoners/new">Создать карточку</Link></div>
     {error && <p className="error" role="alert">{error}</p>}
     <section className="surface-panel prisoner-registry">
       <div className="panel-heading"><div><h2>Реестр личных дел</h2><p>{total} карточек · по {REGISTRY_PAGE_SIZE} на странице</p></div></div>
