@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from .models import Bank, OkedCode, Organization
@@ -38,6 +39,23 @@ class OrganizationSerializer(serializers.ModelSerializer):
         code = OkedCode.objects.filter(code=obj.oked_code).only("name_kk").first()
         return code.name_kk if code else ""
 
+    def validate_bin(self, value):
+        existing = Organization.objects.filter(bin=value)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError("Организация с таким БИН уже существует.")
+        return value
+
+    def validate_iik(self, value):
+        if value and (not self.instance or value.casefold() != self.instance.iik.casefold()):
+            existing = Organization.objects.filter(iik__iexact=value)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError("Организация с таким ИИК уже существует.")
+        return value
+
     def validate(self, attrs):
         same = attrs.get(
             "actual_address_same", getattr(self.instance, "actual_address_same", False)
@@ -71,6 +89,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(errors)
         return attrs
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         request = self.context.get("request")
         if request and request.user.role == request.user.Role.BUSINESS_ADMIN:
@@ -88,5 +107,19 @@ class OrganizationSerializer(serializers.ModelSerializer):
             if forbidden:
                 raise serializers.ValidationError(
                     {field: "Это поле недоступно для редактирования." for field in forbidden}
+                )
+        iik = validated_data.get("iik")
+        if iik and iik.casefold() != instance.iik.casefold():
+            bank = validated_data.get("bank", instance.bank)
+            if bank:
+                list(
+                    Bank.objects.select_for_update()
+                    .filter(bank_code=bank.bank_code)
+                    .order_by("pk")
+                    .values_list("pk", flat=True)
+                )
+            if Organization.objects.filter(iik__iexact=iik).exclude(pk=instance.pk).exists():
+                raise serializers.ValidationError(
+                    {"iik": "Организация с таким ИИК уже существует."}
                 )
         return super().update(instance, validated_data)

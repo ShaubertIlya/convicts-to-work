@@ -1,8 +1,9 @@
 from django.conf import settings
 from django.contrib.auth import logout
+from django.db import IntegrityError
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.authtoken.models import Token
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -62,7 +63,12 @@ class BusinessRegistrationView(APIView):
     def post(self, request):
         serializer = BusinessRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        try:
+            user = serializer.save()
+        except IntegrityError as exc:
+            raise ValidationError(
+                "БИН, ИИК или email уже используется в системе. Проверьте введённые данные."
+            ) from exc
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 

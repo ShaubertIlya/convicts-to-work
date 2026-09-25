@@ -1,5 +1,6 @@
 import pytest
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
@@ -71,6 +72,40 @@ def test_business_registration_creates_company_and_single_admin(registration_ref
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("duplicate_field", ["bin", "iik", "email"])
+def test_business_registration_rejects_duplicate_identity_or_bank_account(
+    registration_references, duplicate_field
+):
+    first = registration_payload(registration_references)
+    assert APIClient().post("/api/auth/register/", first, format="json").status_code == 201
+    second = registration_payload(registration_references)
+    second["bin"] = "123456789013"
+    second["email"] = "other@example.test"
+    second["iik"] = "KZ868562203138317129"
+    if duplicate_field == "bin":
+        second["bin"] = first["bin"]
+    elif duplicate_field == "iik":
+        second["iik"] = first["iik"]
+    else:
+        second["email"] = "ADMIN@EXAMPLE.TEST"
+
+    response = APIClient().post("/api/auth/register/", second, format="json")
+
+    assert response.status_code == 400
+    assert duplicate_field in response.data
+    assert Organization.objects.filter(kind=Organization.Kind.BUSINESS).count() == 1
+    assert User.objects.filter(role=User.Role.BUSINESS_ADMIN).count() == 1
+
+
+@pytest.mark.django_db
+def test_user_email_is_unique_case_insensitively_at_database_level(enbek, make_user):
+    make_user(User.Role.ENBEK_ADMIN, enbek, "unique@example.test")
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        make_user(User.Role.ENBEK_EXECUTOR, enbek, "UNIQUE@EXAMPLE.TEST")
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -118,6 +153,26 @@ def test_business_requisites_are_validated_when_profile_is_edited(
         business,
         data={"iik": "KZ008562203138317128"},
         partial=True,
+    )
+
+    assert not serializer.is_valid()
+    assert "iik" in serializer.errors
+
+
+@pytest.mark.django_db
+def test_business_cannot_change_profile_to_another_company_bank_account(
+    business, registration_references
+):
+    business.bank = registration_references
+    business.kbe = "17"
+    business.iik = "KZ868562203138317129"
+    business.save(update_fields=["bank", "kbe", "iik", "updated_at"])
+    assert APIClient().post(
+        "/api/auth/register/", registration_payload(registration_references), format="json"
+    ).status_code == 201
+
+    serializer = OrganizationSerializer(
+        business, data={"iik": "KZ168562203138317128"}, partial=True
     )
 
     assert not serializer.is_valid()

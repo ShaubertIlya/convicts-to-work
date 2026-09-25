@@ -49,6 +49,15 @@ class EnbekUserCreateSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id",)
 
+    def validate_email(self, value):
+        value = value.lower()
+        existing = User.objects.filter(email__iexact=value)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError("Пользователь с таким email уже существует.")
+        return value
+
     def validate(self, attrs):
         request = self.context["request"]
         organization = attrs.get(
@@ -97,9 +106,14 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(trim_whitespace=False)
 
     def validate(self, attrs):
+        canonical_email = (
+            User.objects.filter(email__iexact=attrs["email"])
+            .values_list("email", flat=True)
+            .first()
+        )
         user = authenticate(
             request=self.context.get("request"),
-            email=attrs["email"],
+            email=canonical_email or attrs["email"],
             password=attrs["password"],
         )
         if user is None or not user.is_active:
@@ -150,6 +164,7 @@ class BusinessRegistrationSerializer(serializers.Serializer):
     )
 
     def validate_email(self, value):
+        value = value.lower()
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError("Пользователь с таким email уже существует.")
         return value
@@ -176,6 +191,8 @@ class BusinessRegistrationSerializer(serializers.Serializer):
     def validate_iik(self, value):
         if not is_valid_kz_iik(value):
             raise serializers.ValidationError("Контрольная сумма ИИК некорректна.")
+        if Organization.objects.filter(iik__iexact=value).exists():
+            raise serializers.ValidationError("Организация с таким ИИК уже существует.")
         return value
 
     def validate(self, attrs):
@@ -191,6 +208,15 @@ class BusinessRegistrationSerializer(serializers.Serializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        bank_code = validated_data["bank"].bank_code
+        list(
+            Bank.objects.select_for_update()
+            .filter(bank_code=bank_code)
+            .order_by("pk")
+            .values_list("pk", flat=True)
+        )
+        if Organization.objects.filter(iik__iexact=validated_data["iik"]).exists():
+            raise serializers.ValidationError({"iik": "Организация с таким ИИК уже существует."})
         user_fields = {key: validated_data.pop(key) for key in ("email", "password", "full_name")}
         organization = Organization.objects.create(
             kind=Organization.Kind.BUSINESS, **validated_data

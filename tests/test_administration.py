@@ -91,6 +91,28 @@ def test_enbek_admin_creates_user_for_selected_organization(enbek, make_user):
 
 
 @pytest.mark.django_db
+def test_admin_cannot_reuse_another_user_email_with_different_case(enbek, make_user):
+    admin = make_user(User.Role.ENBEK_ADMIN, enbek, "admin@enbek.example.test")
+    medic = make_user(User.Role.MEDIC, enbek, "medic@enbek.example.test")
+    client = APIClient()
+    client.force_authenticate(admin)
+
+    created = client.post("/api/auth/users/", {
+        "email": "MEDIC@ENBEK.EXAMPLE.TEST", "password": "Temporary-123",
+        "full_name": "Новый Медик", "role": User.Role.MEDIC,
+        "organization": str(enbek.id),
+    }, format="json")
+    updated = client.patch(f"/api/auth/users/{medic.id}/", {
+        "email": "ADMIN@ENBEK.EXAMPLE.TEST",
+    }, format="json")
+
+    assert created.status_code == 400
+    assert "email" in created.data
+    assert updated.status_code == 400
+    assert "email" in updated.data
+
+
+@pytest.mark.django_db
 def test_user_and_organization_registries_show_ten_rows_per_page(
     business, enbek, make_user
 ):
