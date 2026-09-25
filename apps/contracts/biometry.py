@@ -15,11 +15,19 @@ class BiometryClient:
         self.timeout = settings.BIOMETRY_TIMEOUT_SECONDS
 
     def start(self, reference_file, state: str) -> dict:
+        signature = reference_file.read(8)
+        reference_file.seek(0)
+        if signature.startswith(b"\xff\xd8"):
+            content_type = "image/jpeg"
+        elif signature.startswith(b"\x89PNG\r\n\x1a\n"):
+            content_type = "image/png"
+        else:
+            raise BiometryError("Эталонное фото должно быть в формате JPEG или PNG.")
         try:
             response = httpx.post(
                 f"{self.base_url}/api/v1/verification/start",
                 data={"state": state},
-                files={"reference_image": (reference_file.name, reference_file, "image/jpeg")},
+                files={"reference_image": (reference_file.name, reference_file, content_type)},
                 timeout=self.timeout,
             )
             response.raise_for_status()

@@ -33,6 +33,7 @@ class PrisonerChangeHistorySerializer(serializers.ModelSerializer):
 class PrisonerSerializer(serializers.ModelSerializer):
     skills = SkillSerializer(many=True, read_only=True)
     skill_ids = serializers.JSONField(write_only=True, required=False)
+    is_available = serializers.BooleanField(required=False, default=True)
     has_active_contracts = serializers.BooleanField(read_only=True)
     change_history = PrisonerChangeHistorySerializer(many=True, read_only=True)
     disability_status_label = serializers.CharField(
